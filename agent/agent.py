@@ -22,21 +22,45 @@ THOUGHT: <your reasoning>
 ACTION: <tool_name>
 INPUT: <your search query>
  
+When a tool returns no results and you want to try again:
+THOUGHT: <why you are retrying and what different query you will try>
+REPLAN: <tool_name>
+INPUT: <your new different search query>
+ 
 When you have enough information to answer:
 THOUGHT: I have enough information to answer.
 FINAL ANSWER: <your friendly, clear answer>
  
 Rules:
-- Always write THOUGHT before ACTION or FINAL ANSWER
+- Always write THOUGHT before ACTION, REPLAN, or FINAL ANSWER
 - Never guess product prices or policy details — always use a tool first
 - If question is about both product AND policy, call both tools one at a time
 - Base your FINAL ANSWER only on what tools returned
+- ONE RESPONSE = ONE ACTION or ONE REPLAN or ONE FINAL ANSWER — never mix
+- You MUST wait for OBSERVATION before writing FINAL ANSWER
+- If tool returns nothing — use REPLAN with a different, simpler query
+- Maximum 2 replans per tool — after that give honest FINAL ANSWER
 - Keep FINAL ANSWER short, friendly, and helpful
-- If nothing found, politely say so
-- ONE RESPONSE = ONE ACTION or ONE FINAL ANSWER — never both in the same response
-- You MUST wait for the OBSERVATION before writing FINAL ANSWER
 """
+# ─────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────
+NO_RESULT_SIGNALS = [
+    "no relevant products found",
+    "no results",
+    "nothing found",
+    "not found",
+    "no stock",
+    "couldn't find",
+    "could not find",
+    "no information",
+    "no data",
+]
 
+def is_empty_result(observation: str) -> bool:
+    """Check if tool returned no useful results."""
+    obs_lower = observation.lower()
+    return any(signal in obs_lower for signal in NO_RESULT_SIGNALS)
 
 def run_react_agent(
     user_query: str,
