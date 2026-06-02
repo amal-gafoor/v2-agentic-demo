@@ -1,0 +1,12 @@
+{
+  "shipping_and_delivery": {
+    "title": "Shipping & Delivery Policy",
+    "keywords": ["ship", "shipping", "delivery", "deliver", "dispatch", "arrive", "how long", "when will"],
+    "content": "We offer standard shipping across India. Orders are dispatched within 1-2 business days after confirmation. Standard delivery takes 3-5 business days depending on your location. Express delivery is available for an extra charge. You will receive a tracking link once your order is dispatched. We do not deliver on Sundays and public holidays."
+  },
+  "return_and_refund": {
+    "title": "Return & Refund Policy",
+    "keywords": ["return", "refund", "money back", "exchange", "cancel", "wrong", "damaged", "broken"],
+    "content": "We accept returns within 7 days of delivery. The product must be unused, in original condition, and in original packaging. To initiate a return, contact us with your order ID and reason. Refunds are processed within 5-7 business days after we receive the returned item. Damaged or wrong products are eligible for free return pickup. Sale items are not eligible for return."
+  }
+}

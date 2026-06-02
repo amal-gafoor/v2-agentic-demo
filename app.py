@@ -1,0 +1,55 @@
+from rag_pipeline.vector_store import build_vector_store,load_vector_store
+from memory_store import (
+    load_memory, save_memory,
+      add_message, get_history,
+      clear_scratchpad)
+from rag_pipeline.embeddings import get_embedding_model
+import time
+from agent.agent import run_react_agent
+
+
+def process_message(user_id, query):
+    try:
+        session = load_memory(user_id)
+        history = get_history(session)
+
+        # ReAct agent hnadles everything
+        response = run_react_agent(
+            user_query = query,
+            user_id = user_id,
+            history = history            
+        ) 
+
+        #save memory
+        add_message(session, "user", query)
+        add_message(session, "assistant", response)
+        clear_scratchpad(session)
+        save_memory(user_id, session)
+
+        return response
+    
+    except Exception as e:
+        print(f"[PIPELINE ERROR] {e}")
+        return "Something went wrong. Please try again."
+
+if __name__ == '__main__':
+    print('Loading embedding model')
+    get_embedding_model()
+    print('Embedding model loaded.')
+
+    index, documents = load_vector_store()
+    if index is None:
+        print('Building vector store...')
+        build_vector_store()
+
+    print('Agent is online. Type (exit) to quit.\n')
+
+    while True:
+        user_input = input('User: ')
+        if user_input == 'exit':
+            break
+        response = process_message('test_user2', user_input)
+        print(f'Agent: {response}')
+        print('\n' + '-'*50 + '\n')
+
+
