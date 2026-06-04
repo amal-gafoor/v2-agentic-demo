@@ -3,19 +3,28 @@
 import re
 from llm_wrapper import agent_llm_call
 from agent.tool_registry import TOOL_REGISTRY, call_tool
+from profile_store import (
+    needs_purchase_context,
+    get_purchase_context
+)
 
 
 # ─────────────────────────────────────────────
 # SYSTEM PROMPT
 # ─────────────────────────────────────────────
-def build_system_prompt() -> str:
+def build_system_prompt(purchase_context: str = "") -> str:
     tool_descriptions = ""
     for i, (name, data) in enumerate(TOOL_REGISTRY.items(), 1):
         tool_descriptions += f"{i}. {name} — {data['description']}\n"
 
-    return f"""You are a helpful customer support assistant for a phone case store.
-You answer customer questions about products and store policies.
+    # Only inject purchase context when relevant
+    purchase_section = ""
+    if purchase_context:
+        purchase_section = f"\n{purchase_context}\n"
 
+    return f"""You are a helpful customer support assistant.
+You help customers with product queries and store policies.
+{purchase_section}
 You have access to these tools:
 {tool_descriptions}
 STRICT FORMAT — follow exactly every single time:
@@ -36,8 +45,8 @@ FINAL ANSWER: <your friendly, clear answer>
 
 Rules:
 - Always write THOUGHT before ACTION, REPLAN, or FINAL ANSWER
-- Never guess product prices or policy details — always use a tool first
-- If question is about both product AND policy, call both tools one at a time
+- Never guess product details or policy — always use a tool first
+- If question covers both product AND policy, call both tools one at a time
 - Base your FINAL ANSWER only on what tools returned
 - ONE RESPONSE = ONE ACTION or ONE REPLAN or ONE FINAL ANSWER — never mix
 - You MUST wait for OBSERVATION before writing FINAL ANSWER
@@ -54,9 +63,6 @@ NO_RESULT_SIGNALS = [
     "no relevant products",
     "no relevant",
     "not available",
-    "no nokia",
-    "no samsung",
-    "no apple",
     "couldn't find",
     "could not find",
     "no information",
@@ -68,30 +74,22 @@ NO_RESULT_SIGNALS = [
 ]
 
 def is_empty_result(observation: str) -> bool:
-    """Check if tool returned no useful results."""
     obs_lower = observation.lower()
     return any(signal in obs_lower for signal in NO_RESULT_SIGNALS)
 
 
 def should_replan(tool_input: str) -> bool:
-    """
-    Decide if replanning makes sense.
-    Only replan if query was specific/complex (3+ words).
-    For simple broad queries — product genuinely doesn't exist.
-    """
-    words = tool_input.strip().split()
-    return len(words) >= 3
+    # Only replan if query was specific (3+ words)
+    return len(tool_input.strip().split()) >= 3
 
 
 def build_replan_prompt(tool_name: str, original_input: str, attempt: int) -> str:
-    """Tell LLM to try a simpler query."""
     return (
         f"OBSERVATION: The tool '{tool_name}' returned no results "
         f"for query: '{original_input}'.\n\n"
-        f"Replan attempt {attempt}/{2}. "
-        f"The query was too specific. Try a SIMPLER, BROADER query.\n"
-        f"For example: 'Apple iPhone 13 rugged case' → try 'rugged case'\n\n"
-        f"Use REPLAN format:\n"
+        f"Replan attempt {attempt}/2. "
+        f"Try a SIMPLER, BROADER query.\n"
+        f"Example: 'Apple iPhone 13 rugged case' → try 'rugged case'\n\n"
         f"THOUGHT: <why trying simpler query>\n"
         f"REPLAN: {tool_name}\n"
         f"INPUT: <simpler query>"
@@ -99,40 +97,54 @@ def build_replan_prompt(tool_name: str, original_input: str, attempt: int) -> st
 
 
 def build_not_found_prompt(observation: str) -> str:
-    """Tell LLM product genuinely doesn't exist — give honest answer."""
     return (
         f"OBSERVATION:\n{observation}\n\n"
-        "This product genuinely doesn't exist in our store. "
-        "Give a polite FINAL ANSWER telling the customer we don't carry this, "
-        "and suggest they ask about similar products we might have."
+        "This product doesn't exist in our store. "
+        "Give a polite FINAL ANSWER saying we don't carry this, "
+        "and invite the customer to ask about other products."
     )
 
 
 # ─────────────────────────────────────────────
-# REACT LOOP WITH REPLANNING
+# REACT LOOP
 # ─────────────────────────────────────────────
 def run_react_agent(
     user_query: str,
     user_id: str = "agent",
     history: list = None,
+    profile: dict = None,
     max_iterations: int = 8,
     max_replans: int = 2
 ) -> str:
 
     history = history or []
+    profile = profile or {}
 
+    # ── Decide whether to inject purchase context ──
+    # Only inject if customer is asking about past purchases
+    purchase_context = ""
+    if profile and needs_purchase_context(user_query):
+        purchase_context = get_purchase_context(profile)
+        if purchase_context:
+            print(f"[Agent] Purchase context injected for query: {user_query[:50]}")
+        else:
+            print(f"[Agent] No purchase history found for context")
+    else:
+        print(f"[Agent] No purchase context needed for this query")
+
+    # Last 6 messages for current convo context
     history_messages = [
         {"role": msg["role"], "content": msg["content"]}
         for msg in history[-6:]
     ]
 
+    # Build turns — system prompt (with/without purchase context) + history + query
     turns = (
-        [{"role": "system", "content": build_system_prompt()}]
+        [{"role": "system", "content": build_system_prompt(purchase_context)}]
         + history_messages
         + [{"role": "user", "content": user_query}]
     )
 
-    # Track replans per tool
     replan_counts: dict = {}
 
     for iteration in range(max_iterations):
@@ -150,8 +162,8 @@ def run_react_agent(
 
         print(f"[Agent] LLM:\n{llm_output}\n")
 
-        has_action       = bool(re.search(r"ACTION:\s*\w+",  llm_output))
-        has_replan       = bool(re.search(r"REPLAN:\s*\w+",  llm_output))
+        has_action       = bool(re.search(r"ACTION:\s*\w+", llm_output))
+        has_replan       = bool(re.search(r"REPLAN:\s*\w+", llm_output))
         has_final_answer = "FINAL ANSWER:" in llm_output
 
         # ── Reject mixed response ──
@@ -170,11 +182,9 @@ def run_react_agent(
 
         # ── FINAL ANSWER ──
         if has_final_answer:
-            answer = llm_output.split("FINAL ANSWER:")[-1].strip()
-            print(f"[Agent] Final answer ready")
-            return answer
+            return llm_output.split("FINAL ANSWER:")[-1].strip()
 
-        # ── REPLAN — retry with different query ──
+        # ── REPLAN ──
         replan_match = re.search(r"REPLAN:\s*(\w+)", llm_output)
         if has_replan and replan_match:
             input_match = re.search(r"INPUT:\s*(.+)", llm_output)
@@ -188,29 +198,24 @@ def run_react_agent(
 
             tool_name  = replan_match.group(1).strip()
             tool_input = input_match.group(1).strip()
-
             replan_counts[tool_name] = replan_counts.get(tool_name, 0) + 1
 
-            # Max replans reached — force honest answer
             if replan_counts[tool_name] > max_replans:
-                print(f"[Agent] Max replans reached for {tool_name}")
                 turns.append({"role": "assistant", "content": llm_output})
                 turns.append({
                     "role": "user",
                     "content": (
                         f"You have tried {max_replans} times and found nothing. "
-                        "Give an honest FINAL ANSWER — we don't carry this product. "
-                        "Suggest the customer ask about other products."
+                        "Give an honest FINAL ANSWER."
                     )
                 })
                 continue
 
             print(f"[Agent] REPLAN {replan_counts[tool_name]}/{max_replans} | "
-                  f"Tool: {tool_name} | New input: {tool_input}")
+                  f"Tool: {tool_name} | Input: {tool_input}")
 
             observation = call_tool(tool_name, tool_input, user_id)
             print(f"[Agent] Replan observation: {observation[:200]}...")
-
             turns.append({"role": "assistant", "content": llm_output})
 
             if is_empty_result(observation):
@@ -260,19 +265,15 @@ def run_react_agent(
 
         observation = call_tool(tool_name, tool_input, user_id)
         print(f"[Agent] Observation: {observation[:200]}...")
-
         turns.append({"role": "assistant", "content": llm_output})
 
-        # ── Decide: replan or continue? ──
         if is_empty_result(observation):
             if should_replan(tool_input):
-                print(f"[Agent] Specific query failed — triggering replan")
                 turns.append({
                     "role": "user",
                     "content": build_replan_prompt(tool_name, tool_input, 1)
                 })
             else:
-                print(f"[Agent] Simple query, nothing found — product doesn't exist")
                 turns.append({
                     "role": "user",
                     "content": build_not_found_prompt(observation)
