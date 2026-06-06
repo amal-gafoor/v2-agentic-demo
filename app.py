@@ -8,34 +8,32 @@ from memory_store import (
     clear_scratchpad
 )
 from profile_store import load_profile, save_profile
-from agent.agent import run_react_agent
+from orchestrator import run_orchestrator
 
 
 def process_message(user_id: str, query: str) -> str:
     try:
-        # Load short-term memory — current conversation
+        # Load short-term memory
         session = load_memory(user_id)
         history = get_history(session)
 
-        # Load long-term memory — purchase history only
+        # Load long-term memory
         profile = load_profile(user_id)
 
-        # Run agent — profile passed for optional context injection
-        response = run_react_agent(
+        # Run orchestrator — handles classification + routing
+        response = run_orchestrator(
             user_query=query,
             user_id=user_id,
+            session=session,
             history=history,
             profile=profile
         )
 
-        # Save short-term memory
+        # Save memories
         add_message(session, "user",      query)
         add_message(session, "assistant", response)
         clear_scratchpad(session)
         save_memory(user_id, session)
-
-        # Save long-term memory
-        # (profile may have been updated — e.g. new purchase recorded)
         save_profile(user_id, profile)
 
         return response
