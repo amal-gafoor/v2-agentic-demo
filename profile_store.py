@@ -93,6 +93,7 @@ def needs_purchase_context(query: str) -> bool:
         "my purchase", "tracking", "order status",
         "wrong item", "damaged", "not working"
     ]
+    print(f"[Profile] Checking if query needs purchase context: '{query}'")
     query_lower = query.lower()
     return any(signal in query_lower for signal in PAST_PURCHASE_SIGNALS)
 
