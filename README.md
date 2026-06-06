@@ -198,7 +198,7 @@ python app.py
 
 ## 👤 Author
 
-Built with 🔥 by [Your Name](https://github.com/yourusername)
+Built with 🔥 by [Amal Gafoor P K](https://github.com/amal-gafoor)
 
 ---
 
